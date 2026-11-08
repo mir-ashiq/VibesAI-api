@@ -94,7 +94,7 @@ from .ingredients import (
 )
 from .composition import Composition
 
-__version__ = "1.5.1"
+__version__ = "1.6.0"
 __all__ = [
     # Client
     "VibesClient",

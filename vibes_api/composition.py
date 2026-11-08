@@ -107,13 +107,22 @@ from __future__ import annotations
 
 import copy
 import secrets
+import string
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 
+_BASE36 = string.ascii_lowercase + string.digits
+
+
 def _new_id(prefix: str = "clip") -> str:
-    """Generate a unique clip/track ID."""
-    return f"{prefix}-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+    """Generate a unique clip/track ID.
+
+    Matches the web app format: ``{prefix}-{ms}-{base36(7)}``
+    (e.g. ``video-track-1794116980657-lyqa0p9``).
+    """
+    rand = "".join(secrets.choice(_BASE36) for _ in range(7))
+    return f"{prefix}-{int(time.time() * 1000)}-{rand}"
 
 
 class Composition:

@@ -38,6 +38,27 @@ POLL_INTERVAL = 3.0
 POLL_TIMEOUT = 180.0
 
 
+def _mg_request_id() -> str:
+    """Generate a machine request ID: ``www-{uuidv7}``.
+
+    The web app sends this alongside every ``/api/generate/*`` call
+    (e.g. ``www-01a1b9ab-c353-70dd-8bb7-79544e140370``). The prefix is the
+    request origin (``www`` = web); the rest is a UUID v7.
+    """
+    return f"www-{_uuid_v7()}"
+
+
+def _base36_id(length: int = 7) -> str:
+    """Random base36 string (lowercase letters + digits).
+
+    Used for timeline clip/track IDs by the web app
+    (e.g. ``video-track-1794116980657-lyqa0p9``).
+    """
+    import secrets as _secrets
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    return "".join(_secrets.choice(alphabet) for _ in range(length))
+
+
 class VibesAPIError(Exception):
     """Raised when the vibes.ai API returns an error."""
 
@@ -936,6 +957,8 @@ class VibesClient:
             "batchId": batch_id,
             "inputs": inputs,
             "config": config,
+            "mg_request_id": _mg_request_id(),
+            "projectId": project_id,
         })
 
         if not poll:
@@ -1086,6 +1109,8 @@ class VibesClient:
             "batchId": batch_id,
             "inputs": inputs,
             "config": config,
+            "mg_request_id": _mg_request_id(),
+            "projectId": project_id,
         })
 
     # ------------------------------------------------------------------ #
@@ -1283,6 +1308,8 @@ class VibesClient:
             "batchId": batch_id,
             "inputs": inputs,
             "config": ext_config,
+            "mg_request_id": _mg_request_id(),
+            "projectId": project_id,
         })
 
         if not poll:
@@ -1446,6 +1473,8 @@ class VibesClient:
             "batchId": batch_id,
             "inputs": inputs,
             "config": v2v_config,
+            "mg_request_id": _mg_request_id(),
+            "projectId": project_id,
         })
 
         if not poll:
@@ -1574,6 +1603,8 @@ class VibesClient:
             "batchId": batch_id,
             "inputs": inputs,
             "config": i2v_config,
+            "mg_request_id": _mg_request_id(),
+            "projectId": project_id,
         })
 
         if not poll:
@@ -1689,6 +1720,8 @@ class VibesClient:
             "batchId": new_batch_id,
             "inputs": inputs,
             "config": clean_config,
+            "mg_request_id": _mg_request_id(),
+            "projectId": project_id,
         })
 
         if not poll:
@@ -1864,12 +1897,22 @@ class VibesClient:
     # ------------------------------------------------------------------ #
     #  TTS (text-to-speech)
     # ------------------------------------------------------------------ #
-    def list_voices(self) -> List[dict]:
+    def list_voices(self, limit: Optional[int] = None) -> List[dict]:
         """Return the list of available TTS voices.
 
-        Each voice: ``{id, name, description, sample}``.
+        Parameters
+        ----------
+        limit : int, optional
+            Page size. The web app requests ``limit=100``; the server
+            default returns ~41 voices.
+
+        Returns
+        -------
+        list of dict
+            Each voice: ``{id, name, description, sample}``.
         """
-        return self._get("/api/studio/voices").get("voices", [])
+        params = {"limit": str(limit)} if limit else None
+        return self._get("/api/studio/voices", params=params).get("voices", [])
 
     def tts(self, text: str, voice: str, output_format: str = "mp3",
             language: Optional[str] = None) -> dict:
@@ -2038,10 +2081,39 @@ class VibesClient:
             params["search"] = search
         return self._get("/api/media-library", params=params)
 
-    def favorite_content_item(self, content_item_id: str, favorite: bool = True) -> dict:
-        """Favorite or unfavorite a content item."""
-        return self._post(f"/api/content-items/{content_item_id}/favorite",
-                          json_body={"isFavorited": favorite})
+    def get_media_item(self, item_id: str) -> dict:
+        """Fetch a single media-library item (detail view).
+
+        Returns
+        -------
+        dict
+            The item detail with ``id``, ``type``, ``fullUrl``,
+            ``thumbnailUrl``, ``prompt``, ``isFavorited``, etc.
+        """
+        return self._get(f"/api/media-library/{item_id}")
+
+    def delete_media_item(self, item_id: str) -> dict:
+        """Delete a media-library asset ("Asset deleted" in the UI)."""
+        return self._delete(f"/api/media-library/{item_id}")
+
+    def list_media_item_projects(self, item_id: str) -> List[dict]:
+        """List projects that use a given media-library asset.
+
+        Returns
+        -------
+        list of dict
+            Each ``{id, name, thumbnailUrl, ...}``.
+        """
+        return self._get(f"/api/media-library/{item_id}/projects")
+
+    def favorite_content_item(self, content_item_id: str) -> dict:
+        """Toggle the favorite state of a content item.
+
+        Mirrors the heart icon in the Vibes UI: the endpoint is a pure
+        toggle — the web app sends no body — and returns the updated
+        favorite state.
+        """
+        return self._post(f"/api/content-items/{content_item_id}/favorite")
 
     def delete_content_items(self, ids: List[str]) -> dict:
         """Bulk-delete content items (videos/images)."""
@@ -2231,6 +2303,55 @@ class VibesClient:
         """Delete a studio ingredient by its ID."""
         self._delete(f"/api/studio/ingredients/{ingredient_id}")
 
+    def list_ingredient_projects(self, ingredient_id: str) -> List[dict]:
+        """List projects that use a given ingredient.
+
+        Mirrors the "used in N projects" lookups in the Ingredients tab.
+
+        Parameters
+        ----------
+        ingredient_id : str
+            Numeric ingredient ID (e.g. ``"800957099700717"``).
+
+        Returns
+        -------
+        list of dict
+            Projects referencing the ingredient (empty list if none).
+        """
+        return self._get(f"/api/studio/ingredients/{ingredient_id}/projects")
+
+    def bulk_delete_ingredients(self, ingredient_ids: List[str]) -> dict:
+        """Delete multiple ingredients in one call.
+
+        Mirrors the bulk-delete dialog in the Ingredients tab: a single
+        ID is deleted via ``DELETE /api/studio/ingredients/{id}``, while
+        multiple IDs go through ``POST /api/studio/ingredients/bulk-delete``.
+
+        Parameters
+        ----------
+        ingredient_ids : list of str
+            Ingredient IDs to delete.
+
+        Returns
+        -------
+        dict
+            ``{results: [{ingredientId, status, cleanupStatus,
+            isRetryable}], totals: {requested, deleted, skipped,
+            failedTransient, failedPermanent}}``.
+        """
+        if len(ingredient_ids) == 1:
+            self._delete(f"/api/studio/ingredients/{ingredient_ids[0]}")
+            return {
+                "results": [{"ingredientId": ingredient_ids[0],
+                             "status": "deleted",
+                             "cleanupStatus": "completed",
+                             "isRetryable": False}],
+                "totals": {"requested": 1, "deleted": 1, "skipped": 0,
+                           "failedTransient": 0, "failedPermanent": 0},
+            }
+        return self._post("/api/studio/ingredients/bulk-delete",
+                          json_body={"ingredientIds": ingredient_ids})
+
     # ------------------------------------------------------------------ #
     #  Moodboards
     # ------------------------------------------------------------------ #
@@ -2254,7 +2375,13 @@ class VibesClient:
     # ------------------------------------------------------------------ #
     #  Music library
     # ------------------------------------------------------------------ #
-    def search_music(self, query: str = "", limit: int = 30, cursor: Optional[str] = None) -> dict:
+    def search_music(
+        self,
+        query: str = "",
+        limit: int = 30,
+        cursor: Optional[str] = None,
+        tab: Optional[str] = None,
+    ) -> dict:
         """Search the Meta music library.
 
         Parameters
@@ -2264,14 +2391,20 @@ class VibesClient:
         limit : int
             Page size.
         cursor : str, optional
-            Pagination cursor from a prior call.
+            Pagination cursor from a prior call (the response exposes it
+            as ``end_cursor``).
+        tab : str, optional
+            Feed tab filter. The UI sends ``"popular"`` for the Trending
+            tab and ``"original"`` for Original Audio. Omit for the
+            default (popular) feed.
 
         Returns
         -------
         dict
-            ``{tracks: [...], has_next_page: bool, next_cursor: str?}``.
+            ``{tracks: [...], has_next_page: bool, end_cursor: str?}``.
             Each track has ``audio_cluster_view_id``, ``preview_url``,
-            ``title``, ``artist``, etc.
+            ``title``, ``artist``, ``duration_ms``, ``is_original_audio``,
+            ``signed_preview_url``, etc.
         """
         params: Dict[str, Any] = {}
         if query:
@@ -2279,6 +2412,8 @@ class VibesClient:
             params["limit"] = str(limit)
         else:
             params["limit"] = "50"
+        if tab:
+            params["tab"] = tab
         if cursor:
             params["cursor"] = cursor
         return self._get("/api/meta-music", params=params)
@@ -2529,6 +2664,96 @@ class VibesClient:
             f"/api/projects/{project_id}/timeline/export/{export_id}/cancel"
         )
 
+    def get_last_export(self, project_id: str) -> dict:
+        """Return the status of the most recent timeline export.
+
+        Mirrors ``GET /api/projects/{id}/timeline/export`` — the web app
+        polls this on the Timeline tab (distinct from ``.../export/pending``,
+        which reports queued-but-unstarted exports).
+
+        Returns
+        -------
+        dict
+            ``{lastExport: {...} | null}``.
+        """
+        return self._get(f"/api/projects/{project_id}/timeline/export")
+
+    # ------------------------------------------------------------------ #
+    #  Revision history (session snapshots)
+    # ------------------------------------------------------------------ #
+    def list_revisions(
+        self,
+        entity_type: str,
+        entity_id: str,
+        *,
+        limit: int = 25,
+        offset: Optional[int] = 0,
+    ) -> dict:
+        """List revision-history snapshots for a project or playable.
+
+        The web app records an automatic "Session end" snapshot whenever
+        you leave a project (sendBeacon) and shows the history in the
+        revision browser.
+
+        Parameters
+        ----------
+        entity_type : str
+            ``"project"`` or ``"playable"``.
+        entity_id : str
+            The project / playable ID.
+        limit : int
+            Page size.
+        offset : int, optional
+            Pagination offset (from ``page.nextOffset``).
+
+        Returns
+        -------
+        dict
+            ``{success, revisions: [{id, entityType, entityId, userId,
+            label, createdAt, authorUsername}], page: {count, hasMore,
+            nextOffset}}``.
+        """
+        params: Dict[str, Any] = {
+            "entityType": entity_type,
+            "entityId": entity_id,
+            "limit": limit,
+        }
+        if offset is not None:
+            params["offset"] = offset
+        return self._get("/api/revisions", params=params)
+
+    def save_revision(
+        self,
+        entity_type: str,
+        entity_id: str,
+        snapshot: dict,
+        label: str = "Session end",
+    ) -> dict:
+        """Save a revision snapshot (like the web app's session-end beacon).
+
+        Parameters
+        ----------
+        entity_type : str
+            ``"project"`` or ``"playable"``.
+        entity_id : str
+            The project / playable ID.
+        snapshot : dict
+            The state to snapshot (e.g. the project ``composition``).
+        label : str
+            Human-readable label. The web app uses ``"Session end"``.
+
+        Returns
+        -------
+        dict
+            Server acknowledgement.
+        """
+        return self._post("/api/revisions", json_body={
+            "entityType": entity_type,
+            "entityId": entity_id,
+            "snapshot": snapshot,
+            "label": label,
+        })
+
     # ------------------------------------------------------------------ #
     #  Project assets (cross-project media reuse)
     # ------------------------------------------------------------------ #
@@ -2741,46 +2966,181 @@ class VibesClient:
     # ------------------------------------------------------------------ #
     #  Profile & account settings
     # ------------------------------------------------------------------ #
-    def upload_profile_picture(self, image_base64: str) -> dict:
-        """Upload a profile picture (base64-encoded image)."""
-        return self._post("/api/upload-profile-picture",
-                          json_body={"image": image_base64})
+    def upload_profile_picture(self, path_or_bytes, name: str = "upload.jpg") -> dict:
+        """Upload a profile picture (multipart form upload).
 
-    def upload_profile_picture_file(self, path: str) -> dict:
-        """Upload a profile picture from a file path."""
-        with open(path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("ascii")
-        return self.upload_profile_picture(b64)
-
-    def delete_account(self) -> dict:
-        """Schedule account deletion (irreversible!)."""
-        return self._post("/api/settings/delete-account")
-
-    def delete_all_media(self) -> dict:
-        """Delete all generated media from your account."""
-        return self._post("/api/settings/delete-all-media")
-
-    def remove_all_posts(self) -> dict:
-        """Remove all published posts from your account."""
-        return self._post("/api/settings/remove-all-posts")
-
-    # ------------------------------------------------------------------ #
-    #  Bug reports & analytics
-    # ------------------------------------------------------------------ #
-    def report_bug(self, bug_data: dict) -> dict:
-        """Submit a bug report.
+        Mirrors the account settings avatar picker: the web app POSTs a
+        ``file`` multipart field and receives ``{handle}``.
 
         Parameters
         ----------
-        bug_data : dict
-            Bug report payload (free-form — the UI sends ``{description,
-            steps, expected, actual, ...}``).
-        """
-        return self._post("/api/bug-report", json_body=bug_data)
+        path_or_bytes : str or bytes
+            File path, or raw image bytes.
+        name : str
+            Filename for the multipart part (only used for bytes input).
 
-    def record_consent(self, consent_data: dict) -> dict:
-        """Record cookie consent choices."""
-        return self._post("/api/consent/record", json_body=consent_data)
+        Returns
+        -------
+        dict
+            ``{handle, ...}`` — pass ``handle`` to profile update calls.
+        """
+        if isinstance(path_or_bytes, (bytes, bytearray)):
+            files = {"file": (name, bytes(path_or_bytes))}
+        else:
+            with open(path_or_bytes, "rb") as f:
+                files = {"file": (os.path.basename(path_or_bytes), f)}
+                resp = self.session.post(
+                    self._url("/api/upload-profile-picture"),
+                    files=files,
+                    timeout=max(self.timeout, 300),
+                )
+                return self._check(resp)
+        resp = self.session.post(
+            self._url("/api/upload-profile-picture"),
+            files=files,
+            timeout=max(self.timeout, 300),
+        )
+        return self._check(resp)
+
+    def upload_profile_picture_file(self, path: str) -> dict:
+        """Upload a profile picture from a file path."""
+        return self.upload_profile_picture(path)
+
+    def delete_account(self) -> dict:
+        """Schedule account deletion (irreversible!).
+
+        Uses ``DELETE /api/settings/delete-account`` — the same method
+        the web app's confirm dialog sends.
+        """
+        return self._delete("/api/settings/delete-account")
+
+    def delete_all_media(self) -> dict:
+        """Delete all generated media from your account (irreversible!)."""
+        return self._delete("/api/settings/delete-all-media")
+
+    def remove_all_posts(self) -> dict:
+        """Remove all published posts from your account."""
+        return self._delete("/api/settings/remove-all-posts")
+
+    # ------------------------------------------------------------------ #
+    #  Bug reports, consent & analytics
+    # ------------------------------------------------------------------ #
+    def report_bug(
+        self,
+        description: str,
+        *,
+        product: str = "midjen",
+        misc_info: Optional[str] = None,
+        has_complete_logs: Optional[bool] = None,
+        report_source: Optional[str] = None,
+        uploaded_file: Optional[str] = None,
+    ) -> dict:
+        """Submit a bug report (multipart form, like the UI's report dialog).
+
+        Parameters
+        ----------
+        description : str
+            What went wrong.
+        product : str
+            Product identifier — the web app sends ``"midjen"``.
+        misc_info : str, optional
+            Extra context (browser, session, etc.).
+        has_complete_logs : bool, optional
+            Whether full logs may be attached.
+        report_source : str, optional
+            Where the report was triggered from.
+        uploaded_file : str, optional
+            Path to a screenshot/log file to attach.
+
+        Returns
+        -------
+        dict
+            ``{success, bugId}`` on success.
+        """
+        data = {"description": description, "product": product}
+        if misc_info is not None:
+            data["misc_info"] = misc_info
+        if has_complete_logs is not None:
+            data["has_complete_logs"] = "true" if has_complete_logs else "false"
+        if report_source is not None:
+            data["report_source"] = report_source
+        files = None
+        if uploaded_file:
+            files = {"uploaded_file": (os.path.basename(uploaded_file),
+                                       open(uploaded_file, "rb"))}
+        resp = self.session.post(
+            self._url("/api/bug-report"),
+            data=data,
+            files=files,
+            timeout=max(self.timeout, 300),
+        )
+        if files:
+            for _, (_, fh) in files.items():
+                fh.close()
+        return self._check(resp)
+
+    def record_consent(self) -> dict:
+        """Record cookie-consent acknowledgement (POST, no body)."""
+        return self._post("/api/consent/record")
+
+    def log_analytics(self, events: List[dict]) -> dict:
+        """Send analytics events to ``/api/analytics`` (batched, fire-and-forget).
+
+        The web app batches UI events and posts them periodically:
+
+        .. code-block:: json
+
+            {
+              "timestamp": 1794116946935,
+              "events": [
+                {
+                  "actionTarget": "Add from project",
+                  "actionType": "click",
+                  "eventName": "midjen.button_click",
+                  "httpReferrer": "https://vibes.ai/projects/<id>?tab=timeline",
+                  "interface": "desktop_web",
+                  "timestamp": 1794116941494,
+                  "tracePolicyReferrer": "midjen.project.detail",
+                  "metadata": {"element_type": "button"}
+                }
+              ]
+            }
+
+        Parameters
+        ----------
+        events : list of dict
+            Event dicts shaped like the example above.
+
+        Returns
+        -------
+        dict
+            Server acknowledgement.
+        """
+        return self._post("/api/analytics", json_body={
+            "timestamp": _ms_now(),
+            "events": events,
+        })
+
+    def log_analytics_event(
+        self,
+        event_name: str,
+        action_target: str,
+        action_type: str = "click",
+        interface: str = "desktop_web",
+        metadata: Optional[dict] = None,
+    ) -> dict:
+        """Convenience wrapper to send a single analytics event."""
+        event: Dict[str, Any] = {
+            "actionTarget": action_target,
+            "actionType": action_type,
+            "eventName": event_name,
+            "httpReferrer": self.base_url,
+            "interface": interface,
+            "timestamp": _ms_now(),
+        }
+        if metadata:
+            event["metadata"] = metadata
+        return self.log_analytics([event])
 
     # ------------------------------------------------------------------ #
     #  Quota & upsell

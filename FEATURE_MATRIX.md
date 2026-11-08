@@ -12,6 +12,48 @@ as the backlog for v1.2.0 and beyond.
 
 ---
 
+---
+
+## 0. Live-site audit — November 2026 (v1.6.0)
+
+A full logged-in walkthrough of vibes.ai (plus static analysis of all 31
+production JS chunks) produced a complete inventory of **78 API routes**.
+Result: 70 were already covered by this client. The remaining 8 plus
+several payload corrections shipped in **v1.6.0**:
+
+| Route / behavior | Method | Status |
+|---|---|---|
+| `GET /api/revisions?entityType&entityId` | `list_revisions()` | ✅ new in 1.6.0 |
+| `POST /api/revisions` (session snapshot) | `save_revision()` | ✅ new in 1.6.0 |
+| `GET /api/media-library/{id}` | `get_media_item()` | ✅ new in 1.6.0 |
+| `DELETE /api/media-library/{id}` | `delete_media_item()` | ✅ new in 1.6.0 |
+| `GET /api/media-library/{id}/projects` | `list_media_item_projects()` | ✅ new in 1.6.0 |
+| `GET /api/studio/ingredients/{id}/projects` | `list_ingredient_projects()` | ✅ new in 1.6.0 |
+| `POST /api/studio/ingredients/bulk-delete` | `bulk_delete_ingredients()` | ✅ new in 1.6.0 |
+| `POST /api/analytics` | `log_analytics()` / `log_analytics_event()` | ✅ new in 1.6.0 |
+| `GET /api/projects/{id}/timeline/export` | `get_last_export()` | ✅ new in 1.6.0 |
+| `mg_request_id` + `projectId` on all `/api/generate/*` | all generate methods | ✅ fixed in 1.6.0 |
+| `POST /api/content-items/{id}/favorite` (toggle, no body) | `favorite_content_item()` | ✅ fixed in 1.6.0 |
+| Settings deletions use `DELETE` | `delete_account()` etc. | ✅ fixed in 1.6.0 |
+| `upload-profile-picture` is multipart (`file`) | `upload_profile_picture()` | ✅ fixed in 1.6.0 |
+| `bug-report` is multipart form | `report_bug()` | ✅ fixed in 1.6.0 |
+| `meta-music` `tab` param (popular/original) | `search_music(tab=...)` | ✅ fixed in 1.6.0 |
+| `studio/voices` `limit` param | `list_voices(limit=...)` | ✅ fixed in 1.6.0 |
+| Timeline clip/track IDs use base36 suffix | `Composition` | ✅ aligned in 1.6.0 |
+
+Known server-side quirks (not client bugs, verified Nov 2026):
+
+- `POST /api/studio/playai/tts` intermittently returns
+  `502 {"error":"TTS error: 403 Facebook expired access token"}` — the
+  upstream Facebook token rotates; retry after a few minutes.
+- `GET /api/sync/stream` currently returns 500 from vibes.ai; the web app
+  falls back to polling `GET /api/sync`. `stream_sync_updates_resilient()`
+  already implements the same fallback.
+- `/api/playables` returns `403 {"error":"Playables not enabled"}` for
+  accounts without the playables feature flag.
+
+---
+
 ## 1. Authentication & Account
 
 | Feature | vibes.ai | vibes-api | Status | Notes |

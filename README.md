@@ -43,7 +43,7 @@ client.download_video(batch["content"][0]["id"], "sunset.mp4")
 
 ## 📦 What's inside
 
-### Core capabilities (v1.1.0)
+### Core capabilities (v1.6.0 — verified against vibes.ai Nov 2026)
 
 | Feature | Method | Notes |
 |---|---|---|
@@ -60,19 +60,22 @@ client.download_video(batch["content"][0]["id"], "sunset.mp4")
 | **🖼️ Image editing** | `edit_image()` | prompt-driven edits |
 | **✨ Prompt enhancement** | `enhance_prompt()` | returns 4 AI-rewritten variations |
 | **🗣️ Lip sync** | `generate_lipsync()` | image + audio + script → video |
-| **🔊 TTS** | `tts()`, `list_voices()`, `save_tts_audio()` | 41 preset voices |
+| **🔊 TTS** | `tts()`, `list_voices(limit=...)`, `save_tts_audio()` | 41 preset voices |
 | **🎭 Start/end frame** | `generate_video(start_frame=..., end_frame=...)`, `build_frame_handle()` | image-to-video with keyframes |
-| **🧙 Ingredients (character/style/scene)** | `list_characters()`, `list_styles()`, `list_scenes()`, `create_ingredient()`, `delete_ingredient()` | studio ingredient CRUD |
+| **🧙 Ingredients (character/style/scene)** | `list_characters()`, `list_styles()`, `list_scenes()`, `create_ingredient()`, `delete_ingredient()`, `update_ingredient()`, `list_ingredient_projects()`, `bulk_delete_ingredients()` | studio ingredient CRUD + project usage + bulk delete |
 | **🧙 Ingredient refs in generation** | `ingredients=[...]`, `create_ingredients=[...]` | apply or inline-create |
 | **🎨 Moodboards** | `list_moodboards()`, `get_moodboard()`, `create_moodboard()`, `delete_moodboard()` | |
 | **⬆️ Uploads** | `upload_image()`, `upload_image_file()`, `upload_video_direct()`, `upload_audio_direct()`, `upload_media()`, `upload_profile_picture()` | |
-| **📚 Media library** | `list_media()`, `favorite_content_item()`, `delete_content_item()`, `delete_content_items()` | |
+| **📚 Media library** | `list_media()`, `get_media_item()`, `delete_media_item()`, `list_media_item_projects()`, `favorite_content_item()`, `delete_content_item()`, `delete_content_items()` | favorite is a toggle |
 | **⬇️ Download** | `download_video()`, `download_image()` | |
 | **🔗 Share links** | `create_share_link()`, `list_share_links()`, `revoke_share_link()` | |
-| **🎵 Music library** | `search_music()`, `lookup_music_thumbnail()`, `clip_music()`, `clip_audio()` | |
+| **🎵 Music library** | `search_music(tab=...)`, `lookup_music_thumbnail()`, `clip_music()`, `clip_audio()`, `check_original_audio()` | trending / original-audio tabs |
 | **💬 Timeline chat** | `timeline_chat()` | streaming AI assistant (SSE) |
-| **🎬 Timeline export** | `export_timeline()`, `export_timeline_async()`, `check_export_status()`, `cancel_export()` | render composition → MP4 |
+| **🎬 Timeline export** | `export_timeline()`, `export_timeline_async()`, `check_export_status()`, `cancel_export()`, `get_last_export()`, `get_pending_export()` | render composition → MP4 |
 | **🔄 Real-time sync** | `get_sync_status()`, `stream_sync_updates()`, `stream_batch_updates()` | SSE for collaborative editing |
+| **🕘 Revision history** | `list_revisions()`, `save_revision()` | session snapshots (new on vibes.ai) |
+| **📊 Analytics** | `log_analytics()`, `log_analytics_event()` | UI event tracking |
+| **🐞 Bug reports** | `report_bug()`, `record_consent()` | multipart, like the UI dialogs |
 | **📊 Quota** | `get_quota_upsell()` | |
 | **⚙️ Account settings** | `delete_account()`, `delete_all_media()`, `remove_all_posts()` | |
 | **🐛 Bug reports** | `report_bug()`, `record_consent()` | |

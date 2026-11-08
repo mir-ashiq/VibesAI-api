@@ -5,6 +5,91 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-11-08
+
+### 🔍 Full live-site re-audit (Nov 2026)
+
+Logged-in walkthrough of vibes.ai + JS bundle analysis (31 chunks) produced a
+complete 78-route inventory. This release closes every gap found: 70 routes
+were already covered; the 8 remaining ones plus several payload fixes are
+implemented here. Verified live end-to-end (auth, generation, polling, media,
+ingredients, revisions, music, exports).
+
+### 🆕 Added — Revision history (new on vibes.ai)
+
+The web app now records automatic "Session end" snapshots when you leave a
+project/playable and exposes them at `/api/revisions`:
+
+- `list_revisions(entity_type, entity_id)` — paginated history
+  (`{revisions: [{id, label, createdAt, authorUsername}], page}`)
+- `save_revision(entity_type, entity_id, snapshot, label="Session end")`
+
+### 🆕 Added — Media library item APIs
+
+- `get_media_item(item_id)` — `GET /api/media-library/{id}` detail
+- `delete_media_item(item_id)` — `DELETE /api/media-library/{id}`
+- `list_media_item_projects(item_id)` — projects using an asset
+
+### 🆕 Added — Ingredient project usage + bulk delete
+
+- `list_ingredient_projects(ingredient_id)` — `GET /api/studio/ingredients/{id}/projects`
+- `bulk_delete_ingredients(ingredient_ids)` — mirrors the UI dialog: single
+  ID → `DELETE`, multiple → `POST /api/studio/ingredients/bulk-delete`
+  with `{ingredientIds}` and per-item `{results, totals}` response
+
+### 🆕 Added — Analytics events
+
+- `log_analytics(events)` — batched `POST /api/analytics`
+  (`{timestamp, events: [{actionTarget, actionType, eventName, ...}]}`)
+- `log_analytics_event(...)` — single-event convenience wrapper
+
+### 🆕 Added — Last export status
+
+- `get_last_export(project_id)` — `GET /api/projects/{id}/timeline/export`
+  (returns `{lastExport}`; distinct from `.../export/pending`)
+
+### 🔧 Fixed — Generation payload parity
+
+The web app now sends `mg_request_id` (`www-{uuidv7}`) and `projectId` on
+every `/api/generate/videos` and `/api/generate/images` call. All six call
+sites in this client (t2v, t2i, extend, edit, animate, regenerate) were
+updated. Verified live: generation accepted and completed.
+
+### 🔧 Fixed — HTTP method / payload corrections
+
+- `favorite_content_item()` is now a pure **toggle** (no body) — the web app
+  sends an empty POST
+- `delete_account()`, `delete_all_media()`, `remove_all_posts()` now use
+  **DELETE** (the UI's confirm dialogs send DELETE, not POST)
+- `upload_profile_picture()` now uploads **multipart form data** with a
+  `file` field (returns `{handle}`), matching the avatar picker; accepts a
+  path or raw bytes
+- `report_bug()` now sends **multipart form fields** (`product=midjen`,
+  `misc_info`, `has_complete_logs`, `report_source`, optional
+  `uploaded_file`) like the report dialog, instead of JSON
+- `record_consent()` sends an empty POST (no body)
+
+### 🔧 Fixed — Parameter parity
+
+- `search_music(tab=...)` — new `tab` filter (`"popular"` for Trending,
+  `"original"` for Original Audio); docstring corrected to the real
+  response key `end_cursor` (was documented as `next_cursor`)
+- `list_voices(limit=...)` — optional page size (web app requests 100)
+
+### 🎨 Changed — Composition IDs match the web app format
+
+Clip/track IDs now use `{prefix}-{ms}-{base36×7}` (e.g.
+`video-track-1794116980657-lyqa0p9`) instead of hex suffixes. Cosmetic
+parity; the server accepts both.
+
+### 📝 Docs & tests
+
+- 14 new tests (120 total, all passing offline)
+- `TestEndpointCoverage.ALL_ENDPOINTS` extended with every route found in
+  the Nov 2026 bundles (`/api/analytics`, `/api/revisions`,
+  `/api/studio/ingredients/bulk-delete`, `/api/upload-asset`, ...)
+- README capability table + endpoint reference updated
+
 ## [1.2.0] — 2026-07-16
 
 ### 🎉 Major release — closed 50+ feature gaps from the FEATURE_MATRIX

@@ -42,9 +42,9 @@ class TestImports(unittest.TestCase):
         for name in vibes_api.__all__:
             self.assertTrue(hasattr(vibes_api, name), f"Missing export: {name}")
 
-    def test_version_is_1_5_1(self):
+    def test_version_is_1_6_0(self):
         import vibes_api
-        self.assertEqual(vibes_api.__version__, "1.5.1")
+        self.assertEqual(vibes_api.__version__, "1.6.0")
 
     def test_no_syntax_errors(self):
         import vibes_api.client
@@ -531,7 +531,8 @@ class TestMethodCoverage(unittest.TestCase):
         # Media library
         "list_media", "list_media_by_ingredient", "favorite_content_item",
         "delete_content_item", "delete_content_items", "retry_content_item",
-        "feedback_content_item",
+        "feedback_content_item", "get_media_item", "delete_media_item",
+        "list_media_item_projects",
         # Download
         "download_video", "download_image", "download_content",
         # Share
@@ -540,6 +541,7 @@ class TestMethodCoverage(unittest.TestCase):
         # Ingredients
         "list_ingredients", "list_characters", "list_styles", "list_scenes",
         "create_ingredient", "delete_ingredient", "update_ingredient",
+        "list_ingredient_projects", "bulk_delete_ingredients",
         # Moodboards
         "list_moodboards", "get_moodboard", "create_moodboard",
         "delete_moodboard", "update_moodboard", "lookup_moodboard_by_code",
@@ -551,7 +553,9 @@ class TestMethodCoverage(unittest.TestCase):
         "timeline_chat", "timeline_chat_multi_turn", "submit_tool_result",
         # Timeline export
         "export_timeline", "export_timeline_async", "check_export_status",
-        "cancel_export", "get_pending_export",
+        "cancel_export", "get_pending_export", "get_last_export",
+        # Revision history
+        "list_revisions", "save_revision",
         # Project assets
         "list_project_assets", "add_project_asset", "remove_project_asset",
         "import_project_assets", "list_available_assets",
@@ -564,7 +568,7 @@ class TestMethodCoverage(unittest.TestCase):
         # Quota & rate limit
         "get_quota_upsell", "get_rate_limit_status",
         # Bug reports
-        "report_bug", "record_consent",
+        "report_bug", "record_consent", "log_analytics", "log_analytics_event",
         # Playables
         "list_playables", "get_playable", "create_playable",
         "update_playable", "delete_playable", "duplicate_playable",
@@ -590,6 +594,93 @@ class TestMethodCoverage(unittest.TestCase):
     def test_method_count(self):
         methods = [m for m in dir(VibesClient) if not m.startswith("_") and callable(getattr(VibesClient, m))]
         self.assertGreaterEqual(len(methods), 120, f"Got {len(methods)} methods")
+
+
+class TestV160Features(unittest.TestCase):
+    """Tests for v1.6.0 additions (2026-11 vibes.ai parity updates)."""
+
+    def test_mg_request_id_format(self):
+        from vibes_api.client import _mg_request_id
+        rid = _mg_request_id()
+        self.assertTrue(rid.startswith("www-"))
+        rest = rid[4:]
+        self.assertEqual(len(rest), 36)
+        self.assertEqual(rest[14], "7")  # UUID v7 version nibble
+        self.assertIn(rest[19], "89ab")  # variant
+
+    def test_base36_id_format(self):
+        from vibes_api.client import _base36_id
+        s = _base36_id(7)
+        self.assertEqual(len(s), 7)
+        self.assertTrue(all(c in "abcdefghijklmnopqrstuvwxyz0123456789" for c in s))
+
+    def test_composition_id_matches_ui_format(self):
+        from vibes_api.composition import _new_id
+        cid = _new_id("video-track")
+        ms, rand = cid.split("-")[-2:]
+        self.assertTrue(cid.startswith("video-track-"))
+        self.assertTrue(ms.isdigit())
+        self.assertEqual(len(rand), 7)
+        self.assertTrue(all(c in "abcdefghijklmnopqrstuvwxyz0123456789" for c in rand))
+
+    def test_new_media_methods_exist(self):
+        for m in ("get_media_item", "delete_media_item", "list_media_item_projects"):
+            self.assertTrue(hasattr(VibesClient, m))
+
+    def test_new_ingredient_methods_exist(self):
+        for m in ("list_ingredient_projects", "bulk_delete_ingredients"):
+            self.assertTrue(hasattr(VibesClient, m))
+
+    def test_revision_methods_exist(self):
+        for m in ("list_revisions", "save_revision"):
+            self.assertTrue(hasattr(VibesClient, m))
+
+    def test_analytics_methods_exist(self):
+        for m in ("log_analytics", "log_analytics_event"):
+            self.assertTrue(hasattr(VibesClient, m))
+
+    def test_get_last_export_exists(self):
+        self.assertTrue(hasattr(VibesClient, "get_last_export"))
+
+    def test_favorite_is_toggle(self):
+        # v1.6.0: favorite_content_item is a pure toggle (no body),
+        # mirroring the web app's heart icon.
+        import inspect
+        sig = inspect.signature(VibesClient.favorite_content_item)
+        params = list(sig.parameters)
+        self.assertEqual(params, ["self", "content_item_id"])
+
+    def test_search_music_accepts_tab(self):
+        import inspect
+        sig = inspect.signature(VibesClient.search_music)
+        self.assertIn("tab", sig.parameters)
+
+    def test_list_voices_accepts_limit(self):
+        import inspect
+        sig = inspect.signature(VibesClient.list_voices)
+        self.assertIn("limit", sig.parameters)
+
+    def test_generate_video_source_has_mg_request_id(self):
+        # All /api/generate/* payloads now carry mg_request_id + projectId.
+        import vibes_api.client as cm
+        source = open(cm.__file__).read()
+        self.assertIn("mg_request_id", source)
+        count = source.count('"mg_request_id": _mg_request_id()')
+        self.assertGreaterEqual(count, 6, f"expected >=6 generate call sites, got {count}")
+
+    def test_settings_use_delete_method(self):
+        # v1.6.0: the three destructive settings endpoints use DELETE.
+        import vibes_api.client as cm
+        source = open(cm.__file__).read()
+        self.assertIn('self._delete("/api/settings/delete-account")', source)
+        self.assertIn('self._delete("/api/settings/delete-all-media")', source)
+        self.assertIn('self._delete("/api/settings/remove-all-posts")', source)
+
+    def test_report_bug_signature(self):
+        import inspect
+        sig = inspect.signature(VibesClient.report_bug)
+        self.assertIn("description", sig.parameters)
+        self.assertIn("product", sig.parameters)
 
 
 class TestCLI(unittest.TestCase):
@@ -685,9 +776,10 @@ class TestRateLimit(unittest.TestCase):
 
 class TestEndpointCoverage(unittest.TestCase):
     ALL_ENDPOINTS = [
-        "/api/animate/generate", "/api/auth/check-token", "/api/auth/logout",
-        "/api/auth/me", "/api/bug-report", "/api/collaborators",
-        "/api/consent/record", "/api/content-items/bulk-delete",
+        "/api/analytics", "/api/animate/generate", "/api/auth/check-token",
+        "/api/auth/logout", "/api/auth/me", "/api/bug-report",
+        "/api/collaborators", "/api/consent/record",
+        "/api/content-items/bulk-delete",
         "/api/download/png", "/api/download/video",
         "/api/generate/image-edit", "/api/generate/images",
         "/api/generate/prompts", "/api/generate/videos",
@@ -697,13 +789,15 @@ class TestEndpointCoverage(unittest.TestCase):
         "/api/meta-music/oa-check", "/api/meta-profiles/publish",
         "/api/moodboards", "/api/playables", "/api/projects",
         "/api/proxy-audio", "/api/quota/upsell", "/api/resolve-audio-urls",
-        "/api/settings/delete-account", "/api/settings/delete-all-media",
-        "/api/settings/remove-all-posts", "/api/share-links",
-        "/api/studio/ingredients", "/api/studio/playai/tts",
+        "/api/revisions", "/api/settings/delete-account",
+        "/api/settings/delete-all-media", "/api/settings/remove-all-posts",
+        "/api/share-links", "/api/studio/ingredients",
+        "/api/studio/ingredients/bulk-delete", "/api/studio/playai/tts",
         "/api/studio/voices", "/api/sync", "/api/sync/stream",
         "/api/system-status", "/api/timeline/chat/stream",
-        "/api/upload-audio-direct", "/api/upload-image", "/api/upload-media",
-        "/api/upload-profile-picture", "/api/upload-video-direct",
+        "/api/upload-asset", "/api/upload-audio-direct", "/api/upload-image",
+        "/api/upload-media", "/api/upload-profile-picture",
+        "/api/upload-video-direct",
     ]
 
     def test_all_endpoints_in_source(self):
