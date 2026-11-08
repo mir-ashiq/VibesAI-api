@@ -22,6 +22,7 @@ These tests do NOT hit the live API — they verify:
 import os
 import sys
 import unittest
+import unittest.mock
 
 # Add the package to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -880,6 +881,145 @@ class TestServerAuthEnv(unittest.TestCase):
             c.stop_background_refresh()
         finally:
             os.unlink(path)
+
+
+class TestTtsFallback(unittest.TestCase):
+    """vibes_api.tts_fallback — voice resolution, chunking, engine chain."""
+
+    def test_voice_resolution_openai_names(self):
+        from vibes_api.tts_fallback import resolve_tts_voice
+        r = resolve_tts_voice("alloy")
+        self.assertEqual(r["vibes"], "play_ai_Marisol")
+        self.assertEqual(r["edge"], "en-US-JennyNeural")
+        r2 = resolve_tts_voice(None)
+        self.assertEqual(r2["vibes"], "play_ai_Marisol")
+
+    def test_voice_resolution_edge_and_gtts(self):
+        from vibes_api.tts_fallback import is_edge_voice, parse_gtts_voice, resolve_tts_voice
+        self.assertTrue(is_edge_voice("en-GB-RyanNeural"))
+        self.assertFalse(is_edge_voice("play_ai_Marisol"))
+        self.assertEqual(parse_gtts_voice("gtts-ja"), "ja")
+        self.assertEqual(parse_gtts_voice("gtts"), "en")
+        self.assertIsNone(parse_gtts_voice("alloy"))
+        r = resolve_tts_voice("en-GB-RyanNeural")
+        self.assertEqual(r["edge"], "en-GB-RyanNeural")
+
+    def test_voice_resolution_playai_passthrough(self):
+        from vibes_api.tts_fallback import resolve_tts_voice
+        r = resolve_tts_voice("play_ai_Thunder")
+        self.assertEqual(r["vibes"], "play_ai_Thunder")
+        self.assertEqual(r["edge"], "en-US-ChristopherNeural")
+
+    def test_chunk_text(self):
+        from vibes_api.tts_fallback import _chunk_text
+        self.assertEqual(_chunk_text("short", 100), ["short"])
+        long_text = "Sentence one. Sentence two. " * 20
+        chunks = _chunk_text(long_text, 50)
+        self.assertTrue(all(len(c) <= 50 for c in chunks))
+        self.assertEqual("".join(chunks).replace(" ", ""), long_text.replace(" ", ""))
+
+    def test_gtts_language_mapping(self):
+        from vibes_api.tts_fallback import _to_gtts_language
+        self.assertEqual(_to_gtts_language("eng"), "en")
+        self.assertEqual(_to_gtts_language("hin"), "hi")
+        self.assertEqual(_to_gtts_language("zh"), "zh-CN")
+        self.assertEqual(_to_gtts_language(None), "en")
+
+    def _fake_client(self, raises=False):
+        class Fake:
+            def __init__(self, raises):
+                self.raises = raises
+                self.calls = []
+            def _tts_raw(self, text, voice, output_format, language):
+                self.calls.append((text, voice))
+                if self.raises:
+                    raise RuntimeError("TTS error: 403 Facebook expired access token")
+                return {"audioBase64": "dmlicw==", "contentType": "audio/mpeg"}
+        return Fake(raises)
+
+    def test_chain_uses_vibes_when_healthy(self):
+        from vibes_api import synthesize_speech
+        fake = self._fake_client(raises=False)
+        out = synthesize_speech(fake, "hi", "alloy")
+        self.assertEqual(out["engine"], "vibes")
+        self.assertEqual(fake.calls, [("hi", "play_ai_Marisol")])
+
+    def test_chain_falls_back_when_vibes_down(self):
+        from vibes_api import tts_fallback as tf
+        fake = self._fake_client(raises=True)
+        # Fake both fallback engines (no network in unit tests).
+        saved_edge, saved_gtts = tf.edge_tts_sync, tf.gtts_sync
+        try:
+            tf.edge_tts_sync = lambda text, voice, rate="+0%": b"EDGEMP3"
+            out = tf.synthesize_speech(fake, "hi", "alloy")
+            self.assertEqual(out["engine"], "edge-tts")
+            self.assertEqual(out["contentType"], "audio/mpeg")
+            import base64 as b64
+            self.assertEqual(b64.b64decode(out["audioBase64"]), b"EDGEMP3")
+
+            tf.edge_tts_sync = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("edge down"))
+            tf.gtts_sync = lambda text, language=None, slow=False: b"GTTSMP3"
+            out2 = tf.synthesize_speech(fake, "hi", "alloy")
+            self.assertEqual(out2["engine"], "gtts")
+            self.assertEqual(b64.b64decode(out2["audioBase64"]), b"GTTSMP3")
+
+            # Both engines down -> error mentioning them
+            tf.gtts_sync = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("gtts down"))
+            with self.assertRaises(RuntimeError) as ctx:
+                tf.synthesize_speech(fake, "hi", "alloy")
+            self.assertIn("all TTS engines failed", str(ctx.exception))
+        finally:
+            tf.edge_tts_sync, tf.gtts_sync = saved_edge, saved_gtts
+
+    def test_mode_off_reraises_vibes_error(self):
+        from vibes_api import synthesize_speech
+        fake = self._fake_client(raises=True)
+        with self.assertRaises(RuntimeError):
+            synthesize_speech(fake, "hi", "alloy", mode="off")
+
+    def test_mode_only_skips_vibes(self):
+        from vibes_api import tts_fallback as tf
+        fake = self._fake_client(raises=False)
+        saved_edge = tf.edge_tts_sync
+        try:
+            tf.edge_tts_sync = lambda text, voice, rate="+0%": b"EDGEONLY"
+            out = tf.synthesize_speech(fake, "hi", "alloy", mode="only")
+            self.assertEqual(out["engine"], "edge-tts")
+            self.assertEqual(fake.calls, [])  # vibes never called
+        finally:
+            tf.edge_tts_sync = saved_edge
+
+    def test_explicit_gtts_voice_skips_vibes_and_edge(self):
+        from vibes_api import tts_fallback as tf
+        fake = self._fake_client(raises=False)
+        saved_gtts = tf.gtts_sync
+        try:
+            tf.gtts_sync = lambda text, language=None, slow=False: b"JA-MP3"
+            out = tf.synthesize_speech(fake, "こんにちは", "gtts-ja")
+            self.assertEqual(out["engine"], "gtts")
+            self.assertEqual(out["voice"], "gtts-ja")
+            self.assertEqual(fake.calls, [])
+        finally:
+            tf.gtts_sync = saved_gtts
+
+    def test_client_tts_delegates(self):
+        from vibes_api import VibesClient
+        c = VibesClient(meta_session="test-cookie", auto_refresh=False)
+        with unittest.mock.patch.object(c, "_tts_raw") as raw:
+            raw.return_value = {"audioBase64": "eA==", "contentType": "audio/mpeg"}
+            out = c.tts("hi", "alloy")
+            self.assertEqual(out["engine"], "vibes")
+            raw.assert_called_once_with("hi", "play_ai_Marisol", "mp3", None)
+        # allow_fallback=False bypasses the chain entirely
+        with unittest.mock.patch.object(c, "_tts_raw") as raw:
+            raw.return_value = {"audioBase64": "eA=="}
+            out2 = c.tts("hi", "play_ai_Marisol", allow_fallback=False)
+            self.assertNotIn("engine", out2)
+
+    def test_server_tts_env_mode(self):
+        import importlib
+        app_mod = importlib.import_module("server.app")
+        self.assertIn("synthesize_speech_async", dir(app_mod))
 
 
 if __name__ == "__main__":

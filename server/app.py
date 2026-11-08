@@ -8,6 +8,11 @@ from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vibes_api import VibesClient, VibesAPIError
+from vibes_api.tts_fallback import (
+    EDGE_VOICE_CATALOG,
+    GTTS_LANGUAGES,
+    synthesize_speech_async,
+)
 
 _client: Optional[VibesClient] = None
 _lock = threading.Lock()
@@ -211,13 +216,44 @@ async def enhance_prompt(b: PE):
 
 @app.get("/api/v1/voices", tags=["TTS"], dependencies=AUTH)
 async def list_voices():
-    try: return {"voices": get_client().list_voices()}
-    except Exception as e: _err(e)
+    """Voice catalog across every TTS engine.
+
+    Each entry carries an ``engine`` field: ``vibes`` (vibes.ai PlayAI —
+    primary), ``edge-tts`` (Microsoft neural fallback), ``gtts`` (Google
+    Translate fallback). When vibes.ai is unreachable the fallback voices
+    are still listed.
+    """
+    fallback = (
+        [{**v, "engine": "edge-tts"} for v in EDGE_VOICE_CATALOG]
+        + [{**v, "engine": "gtts"} for v in GTTS_LANGUAGES]
+    )
+    try:
+        voices = get_client().list_voices()
+        return {
+            "voices": [{"id": v.get("id"), "name": v.get("name"),
+                        "description": v.get("description"),
+                        "sample": v.get("sample"), "engine": "vibes"} for v in voices]
+            + fallback,
+        }
+    except Exception:
+        return {"voices": fallback}
 
 @app.post("/api/v1/tts", tags=["TTS"], dependencies=AUTH)
 async def tts(b: TT):
-    try: return get_client().tts(text=b.text, voice=b.voice, output_format=b.output_format, language=b.language)
-    except Exception as e: _err(e)
+    """Synthesize speech with the fallback chain (env ``VIBES_TTS_FALLBACK``).
+
+    ``VIBES_TTS_FALLBACK=auto`` (default): vibes.ai → Edge TTS → Google
+    Translate TTS. ``off``: vibes.ai only. ``only``: skip vibes.ai. The
+    engine used is in the ``engine`` field of the response.
+    """
+    mode = os.environ.get("VIBES_TTS_FALLBACK", "auto")
+    try:
+        return await synthesize_speech_async(
+            get_client(), text=b.text, voice=b.voice,
+            output_format=b.output_format, language=b.language, mode=mode,
+        )
+    except Exception as e:
+        _err(e)
 
 @app.get("/api/v1/media", tags=["Media"], dependencies=AUTH)
 async def list_media(limit: int = 50, offset: int = 0, type: Optional[str] = None, search: Optional[str] = None):

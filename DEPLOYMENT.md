@@ -22,6 +22,7 @@ docker compose up -d
 | `VIBES_API_KEY` | No | If set, REST clients must send it as `X-API-Key` (or `Authorization: Bearer`). |
 | `VIBES_COOKIE_FILE` | No | File the latest `meta_session` is persisted to and reloaded from on restart (compose wires `/data/.vibes_cookie`). |
 | `VIBES_REFRESH_INTERVAL` | No | Keep-alive ping interval in seconds (default `1500` = 25 min). |
+| `VIBES_TTS_FALLBACK` | No | TTS fallback policy for `POST /api/v1/tts`: `auto` (default) — vibes.ai → Edge TTS → Google Translate TTS; `off` — vibes.ai only; `only` — skip vibes.ai. For the best neural fallback: `pip install VibesAI-api[tts]` (adds `edge-tts`; already in `requirements-server.txt`). |
 
 > 🍪 **Not sure how to get the cookies?** **[COOKIES.md](COOKIES.md)** walks you through grabbing both `VIBES_META_SESSION` and `AUTH_META_COOKIES` from your browser's DevTools, step by step, with format examples and troubleshooting.
 

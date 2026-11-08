@@ -62,7 +62,7 @@ client.download_video(batch["content"][0]["id"], "sunset.mp4")
 | **🖼️ Image editing** | `edit_image()` | prompt-driven edits |
 | **✨ Prompt enhancement** | `enhance_prompt()` | returns 4 AI-rewritten variations |
 | **🗣️ Lip sync** | `generate_lipsync()` | image + audio + script → video |
-| **🔊 TTS** | `tts()`, `list_voices(limit=...)`, `save_tts_audio()` | 41 preset voices |
+| **🔊 TTS (with fallback)** | `tts()`, `list_voices(limit=...)`, `save_tts_audio()` | vibes.ai PlayAI → Edge TTS → Google Translate TTS fallback chain |
 | **🎭 Start/end frame** | `generate_video(start_frame=..., end_frame=...)`, `build_frame_handle()` | image-to-video with keyframes |
 | **🧙 Ingredients (character/style/scene)** | `list_characters()`, `list_styles()`, `list_scenes()`, `create_ingredient()`, `delete_ingredient()`, `update_ingredient()`, `list_ingredient_projects()`, `bulk_delete_ingredients()` | studio ingredient CRUD + project usage + bulk delete |
 | **🧙 Ingredient refs in generation** | `ingredients=[...]`, `create_ingredients=[...]` | apply or inline-create |
@@ -400,9 +400,36 @@ Cookies **expire** (~30 min idle). The web app refreshes them silently via `/api
 
    Grab-and-go details, format rules, and troubleshooting: **[COOKIES.md](COOKIES.md)**.
 
-### TTS-specific limitation
+### TTS: three engines, always-on fallback
 
-The TTS endpoint (`/api/studio/playai/tts`) depends on a **server-side Facebook access token** that rotates independently of your `meta_session`. If you see `403 Facebook expired access token`, just wait a few minutes and retry. The Vibes backend auto-refreshes this token on its own schedule.
+vibes.ai's PlayAI TTS periodically goes down server-side with `403 Facebook expired access token` — during those outages even the vibes.ai website itself cannot synthesize audio (verified with a logged-in browser session). `client.tts()` therefore chains engines:
+
+1. **vibes.ai PlayAI** — 41 studio voices (primary, used whenever vibes.ai is healthy)
+2. **Edge TTS** (Microsoft neural) — 400+ voices, keyless — install with `pip install VibesAI-api[tts]`
+3. **Google Translate TTS** — keyless, ~100 languages, always available (plain `requests`)
+
+The engine that spoke is in the `engine` key of the response (`"vibes"` | `"edge-tts"` | `"gtts"`).
+
+```python
+client = VibesClient(meta_session="...")
+
+# OpenAI-style voice names map across engines
+out = client.tts("Hello!", "alloy")
+print(out["engine"])          # "vibes" when healthy, "edge-tts"/"gtts" during outages
+client.save_tts_audio(out, "hello.mp3")
+
+# Pick an engine explicitly:
+client.tts("Hello!", "play_ai_Marisol")      # vibes.ai only (no fallback tried first)
+client.tts("Hello!", "en-GB-RyanNeural")      # Edge TTS directly
+client.tts("こんにちは", "gtts-ja")           # Google Translate TTS directly
+
+client.tts("Hello!", "alloy", allow_fallback=False)   # strict vibes.ai mode
+```
+
+The REST server's `POST /api/v1/tts` uses the same chain, controlled by the
+`VIBES_TTS_FALLBACK` env var (`auto` default | `off` | `only`), and
+`GET /api/v1/voices` now lists every voice with an `engine` field
+(vibes + Edge + GTTS — it keeps working even when vibes.ai is unreachable).
 
 ---
 
@@ -550,7 +577,7 @@ python /home/z/my-project/download/vibes-api/examples/01_generate_video.py
 ## ⚠️ Limitations & caveats
 
 1. **Cookie rotation** — `meta_session` expires. Re-grab from the browser when 401s appear.
-2. **TTS backend token** — `/api/studio/playai/tts` depends on a server-side FB token that rotates independently. If you get `403 Facebook expired access token`, wait and retry.
+2. **TTS backend token** — `/api/studio/playai/tts` depends on a server-side FB token that rotates independently. When it's down you get `403 Facebook expired access token` — `client.tts()` bridges those outages automatically via Edge TTS / Google Translate TTS (see the TTS section above).
 3. **Generation quotas** — Vibes enforces per-user quotas (visible in the UI). Hit it and you'll get `429` or a `GENERATION_FAILED` with quota detail.
 4. **No public API** — All endpoints here are private and could change at any time. Pin to a client version if stability matters.
 5. **Content IDs for download** — `download_video(id)` expects the format `batch-{uuid}-content-{n}`. The client uses the `batch-` prefix consistently so this works for client-generated batches.

@@ -118,4 +118,26 @@ __all__ = [
     "build_ingredient_payload",
     # Composition helper
     "Composition",
+    # TTS fallback engines
+    "synthesize_speech",
+    "synthesize_speech_async",
+    "resolve_tts_voice",
+    "is_edge_voice",
+    "parse_gtts_voice",
+    "edge_tts_available",
+    "EDGE_VOICE_CATALOG",
+    "GTTS_LANGUAGES",
 ]
+
+
+# TTS fallback engines (vibes.ai -> Edge TTS -> Google Translate TTS)
+from .tts_fallback import (  # noqa: E402
+    EDGE_VOICE_CATALOG,
+    GTTS_LANGUAGES,
+    edge_tts_available,
+    is_edge_voice,
+    parse_gtts_voice,
+    resolve_tts_voice,
+    synthesize_speech,
+    synthesize_speech_async,
+)

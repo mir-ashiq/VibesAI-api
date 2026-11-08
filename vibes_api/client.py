@@ -1914,33 +1914,9 @@ class VibesClient:
         params = {"limit": str(limit)} if limit else None
         return self._get("/api/studio/voices", params=params).get("voices", [])
 
-    def tts(self, text: str, voice: str, output_format: str = "mp3",
-            language: Optional[str] = None) -> dict:
-        """Synthesize speech via PlayAI TTS.
-
-        Parameters
-        ----------
-        text : str
-            The text to speak.
-        voice : str
-            Voice ID from ``list_voices`` (e.g., ``"play_ai_Marisol"``).
-        output_format : str
-            Default "mp3".
-        language : str, optional
-            Language code if needed.
-
-        Returns
-        -------
-        dict
-            ``{audioBase64, contentType}``. Use ``save_tts_audio()`` to
-            decode to a file, or pass to ``upload_audio_direct``.
-
-        Notes
-        -----
-        This endpoint depends on a server-side Facebook access token
-        that rotates. If you get ``403 Facebook expired access token``,
-        wait a few minutes and retry.
-        """
+    def _tts_raw(self, text: str, voice: str, output_format: str = "mp3",
+                 language: Optional[str] = None) -> dict:
+        """Raw vibes.ai PlayAI call (no fallback). Used by tts_fallback."""
         body: Dict[str, Any] = {
             "text": text,
             "voice": voice,
@@ -1949,6 +1925,49 @@ class VibesClient:
         if language:
             body["language"] = language
         return self._post("/api/studio/playai/tts", json_body=body)
+
+    def tts(self, text: str, voice: str, output_format: str = "mp3",
+            language: Optional[str] = None, allow_fallback: bool = True) -> dict:
+        """Synthesize speech — vibes.ai PlayAI with automatic fallback.
+
+        Parameters
+        ----------
+        text : str
+            The text to speak.
+        voice : str
+            Any voice id: OpenAI name (``"alloy"``, ``"echo"``, …),
+            ``play_ai_*`` id from ``list_voices()``, an Edge neural id
+            (``"en-US-JennyNeural"``) or a GTTS id (``"gtts-ja"``).
+        output_format : str
+            Default "mp3". Fallback engines always produce MP3.
+        language : str, optional
+            Language code if needed.
+        allow_fallback : bool, default True
+            When vibes.ai's TTS backend is down (the recurring
+            ``403 Facebook expired access token`` outage — even the
+            vibes.ai site itself fails then), fall back to Edge TTS
+            (needs ``pip install VibesAI-api[tts]``) and Google Translate
+            TTS (always available). Set ``False`` for vibes.ai-only.
+
+        Returns
+        -------
+        dict
+            ``{audioBase64, contentType, engine, voice}`` — ``engine`` is
+            ``"vibes"``, ``"edge-tts"`` or ``"gtts"``. Use
+            ``save_tts_audio()`` to decode to a file, or pass to
+            ``upload_audio_direct``.
+
+        Notes
+        -----
+        The vibes.ai endpoint depends on a server-side Facebook access
+        token that rotates. With ``allow_fallback=True`` those outages are
+        bridged automatically; the response's ``engine`` key tells you which
+        engine spoke.
+        """
+        if allow_fallback:
+            from .tts_fallback import synthesize_speech
+            return synthesize_speech(self, text, voice, output_format, language, mode="auto")
+        return self._tts_raw(text, voice, output_format, language)
 
     def save_tts_audio(self, tts_response: dict, path: str) -> str:
         """Decode a TTS API response and save as an audio file.
