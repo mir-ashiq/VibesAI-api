@@ -12,7 +12,7 @@ This package was built by reverse-engineering the vibes.ai Next.js bundles and o
 # 1) Install
 pip install VibesAI-api
 
-# 2) Set your cookie (grab from DevTools → Application → Cookies → vibes.ai)
+# 2) Set your cookie (full guide: COOKIES.md)
 export VIBES_META_SESSION="e60e910a-242a-...-K54E"
 
 # 3) Generate your first video
@@ -21,6 +21,8 @@ vibes-api one-shot \
   --aspect-ratio 16:9 --resolution 720p --variations 4 \
   --download-dir ./out
 ```
+
+> 🍪 **Where do I get that cookie?** See **[COOKIES.md](COOKIES.md)** — a step-by-step guide (with screenshots-level detail) for grabbing both `VIBES_META_SESSION` (vibes.ai `meta_session` cookie) and `AUTH_META_COOKIES` (auth.meta.com cookies for automatic re-login) from your browser's DevTools.
 
 Or in Python:
 
@@ -352,7 +354,16 @@ The `source_video` dict must be the full content item (not just an ID) because e
 
 Vibes uses a single cookie, `meta_session`, for authentication. The cookie value is a UUID session token.
 
-### How to get your cookie
+> **Full step-by-step guide with both cookies: [COOKIES.md](COOKIES.md)**
+
+### The two credentials
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VIBES_META_SESSION` | **Yes** | Value of the `meta_session` cookie from `vibes.ai` — authenticates every API call. |
+| `AUTH_META_COOKIES` | No (recommended) | Cookie string from `auth.meta.com` — enables automatic re-login when the session expires. |
+
+### How to get your cookie (short version)
 
 1. Log in at [vibes.ai](https://vibes.ai) in your browser (currently requires a Meta/Facebook account).
 2. Open DevTools (F12) → Application → Cookies → `https://vibes.ai`.
@@ -369,9 +380,25 @@ Vibes uses a single cookie, `meta_session`, for authentication. The cookie value
    export VIBES_META_SESSION="e60e910a-..."
    ```
 
-### Cookie rotation
+### Cookie rotation & auto re-login
 
-Cookies **expire**. The web app refreshes them silently via `/api/auth/me`. When you start getting `401 Unauthorized` errors, grab a fresh cookie from the browser and create a new `VibesClient`. You said you'll rotate them — this is the only manual step.
+Cookies **expire** (~30 min idle). The web app refreshes them silently via `/api/auth/me`, and this client does the same. Two layers of protection:
+
+1. **Passive refresh** — `Set-Cookie` headers are intercepted on every response, and a background thread pings `/api/auth/me` every 25 min (on by default).
+2. **Active re-login** — set `AUTH_META_COOKIES` (auth.meta.com cookies, DevTools → Application → Cookies → `auth.meta.com`, joined as `name=value; name=value`) and a `401` triggers a full OIDC re-login that mints a brand-new `meta_session` automatically:
+
+   ```python
+   client = VibesClient(
+       meta_session="e60e910a-...",
+       auth_meta_cookies="ps_n=1; ps_l=1; datr=Bxxx...; fs=1; locale=en_GB",
+   )
+   # or at runtime:
+   client.set_auth_meta_cookies("ps_n=1; ps_l=1; datr=Bxxx...; fs=1; locale=en_GB")
+   ```
+
+   Server/Docker: `export AUTH_META_COOKIES="..."` — setting it enables auto re-login.
+
+   Grab-and-go details, format rules, and troubleshooting: **[COOKIES.md](COOKIES.md)**.
 
 ### TTS-specific limitation
 

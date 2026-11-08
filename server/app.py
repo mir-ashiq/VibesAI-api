@@ -30,10 +30,13 @@ def get_client() -> VibesClient:
                         try:
                             with open(cf, "w") as f: f.write(c)
                         except: pass
+                amc = os.environ.get("AUTH_META_COOKIES", "").strip()
                 _client = VibesClient(meta_session=ms, auto_refresh=True,
                     background_refresh=True,
                     refresh_interval=float(os.environ.get("VIBES_REFRESH_INTERVAL","1500")),
-                    on_cookie_refresh=save)
+                    on_cookie_refresh=save,
+                    auto_relogin=bool(amc),
+                    auth_meta_cookies=amc or None)
     return _client
 
 def verify_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key"),

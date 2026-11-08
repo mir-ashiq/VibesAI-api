@@ -5,6 +5,7 @@ services:
     environment:
       - VIBES_META_SESSION=${VIBES_META_SESSION:?required}
       - VIBES_API_KEY=${VIBES_API_KEY:-}
+      - AUTH_META_COOKIES=${AUTH_META_COOKIES:-}
       - VIBES_COOKIE_FILE=/data/.vibes_cookie
     volumes: ["vibes-data:/data"]
     restart: unless-stopped

@@ -807,5 +807,80 @@ class TestEndpointCoverage(unittest.TestCase):
         self.assertEqual(missing, [], f"Endpoints not in source: {missing}")
 
 
+class TestServerAuthEnv(unittest.TestCase):
+    """server/app.py get_client() env wiring: VIBES_META_SESSION + AUTH_META_COOKIES."""
+
+    ENV_KEYS = ("VIBES_META_SESSION", "AUTH_META_COOKIES", "VIBES_COOKIE_FILE",
+                "VIBES_REFRESH_INTERVAL", "VIBES_API_KEY")
+
+    def setUp(self):
+        self._saved = {k: os.environ.get(k) for k in self.ENV_KEYS}
+        # NB: `import server.app` binds the FastAPI instance (server/__init__.py
+        # re-exports `app`), so import the module object explicitly:
+        import importlib
+        self.app_mod = importlib.import_module("server.app")
+        self._saved_client = self.app_mod._client
+        self.app_mod._client = None
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self.app_mod._client = self._saved_client
+
+    def test_missing_meta_session_raises(self):
+        os.environ.pop("VIBES_META_SESSION", None)
+        os.environ.pop("VIBES_COOKIE_FILE", None)
+        with self.assertRaises(Exception) as ctx:
+            self.app_mod.get_client()
+        msg = getattr(ctx.exception, "detail", str(ctx.exception))
+        self.assertIn("VIBES_META_SESSION", str(msg))
+
+    def test_auth_meta_cookies_enables_relogin(self):
+        os.environ["VIBES_META_SESSION"] = "test-session-token"
+        os.environ["AUTH_META_COOKIES"] = "ps_n=1; ps_l=1; datr=X; locale=en_GB"
+        os.environ.pop("VIBES_COOKIE_FILE", None)
+        c = self.app_mod.get_client()
+        self.assertEqual(c.auth_meta_cookies, "ps_n=1; ps_l=1; datr=X; locale=en_GB")
+        self.assertTrue(c.auto_relogin)
+        self.assertEqual(c.get_current_cookie(), "test-session-token")
+        c.stop_background_refresh()
+
+    def test_no_auth_meta_cookies_leaves_relogin_off(self):
+        os.environ["VIBES_META_SESSION"] = "test-session-token"
+        os.environ.pop("AUTH_META_COOKIES", None)
+        os.environ.pop("VIBES_COOKIE_FILE", None)
+        c = self.app_mod.get_client()
+        self.assertIsNone(c.auth_meta_cookies)
+        self.assertFalse(c.auto_relogin)
+        c.stop_background_refresh()
+
+    def test_blank_auth_meta_cookies_is_ignored(self):
+        os.environ["VIBES_META_SESSION"] = "test-session-token"
+        os.environ["AUTH_META_COOKIES"] = "   "
+        os.environ.pop("VIBES_COOKIE_FILE", None)
+        c = self.app_mod.get_client()
+        self.assertIsNone(c.auth_meta_cookies)
+        self.assertFalse(c.auto_relogin)
+        c.stop_background_refresh()
+
+    def test_cookie_file_overrides_env_session(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".cookie", delete=False) as f:
+            f.write("file-cookie-token")
+            path = f.name
+        try:
+            os.environ["VIBES_META_SESSION"] = "env-session-token"
+            os.environ["VIBES_COOKIE_FILE"] = path
+            os.environ.pop("AUTH_META_COOKIES", None)
+            c = self.app_mod.get_client()
+            self.assertEqual(c.get_current_cookie(), "file-cookie-token")
+            c.stop_background_refresh()
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
